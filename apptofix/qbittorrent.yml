@@ -1,0 +1,274 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # FACTS #######################################################################
+
+    - name: 'Set Known Facts'
+      set_fact:
+        psarole: 'qbittorrent'
+        int1: '8080'
+        ext1: '8083'
+        image: 'linuxserver/qbittorrent'
+
+    # CORE (MANDATORY) #############################################################
+    - name: 'Mandatory Core Role'
+      include_tasks: '/psa/apps/_core.yml''
+
+    - name: 'Including folders'
+      include_tasks: '/psa/apps/programs/_downloaders.yml'
+
+    - name: 'Including plugins'
+      include_tasks: '/psa/apps/programs/_plugins.yml'
+
+    # LABELS ######################################################################
+    - name: 'Adding Traefik'
+      set_fact:
+        psa_labels:
+          traefik.frontend.auth.forward.address: '{{gauth}}'
+          traefik.enable: 'true'
+          traefik.port: '{{int1}}'
+          traefik.frontend.rule: 'Host:{{psarole}}.{{domain}},{{tldset}}'
+
+    - name: 'Setting PSA Volumes'
+      set_fact:
+        psa_volumes:
+          - '/etc/localtime:/etc/localtime:ro'
+          - '/psa/data/{{psarole}}:/config'
+          - '{{path.stdout}}:{{path.stdout}}'
+          - '/mnt:/mnt'
+
+    - name: 'Setting PSA ENV'
+      set_fact:
+        psa_env:
+          PUID: '1000'
+          PGID: '1000'
+
+    # MAIN DEPLOYMENT #############################################################
+    - name: 'Checking for existing app data'
+      stat:
+        path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+      register: confcheck
+
+    - name: 'Deploying {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        image: '{{image}}'
+        pull: yes
+        published_ports:
+          - '{{serverports}}{{ext1}}:{{int1}}'
+        volumes: '{{psa_volumes}}'
+        env: '{{psa_env}}'
+        restart_policy: unless-stopped
+        networks:
+          - name: psautomate
+            aliases:
+              - '{{psarole}}'
+        state: started
+        labels: '{{psa_labels}}'
+
+    # CONFIGURATION ####################################################
+    - name: 'Waiting for {{psarole}} to initialize'
+      wait_for:
+        path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+        state: present
+        timeout: 15
+        delay: 5
+
+    - name: 'Stopping {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        state: stopped
+
+    - name: Set SavePath
+      ini_file:
+        path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+        section: Preferences
+        option: Downloads\SavePath
+        value: '{{path.stdout}}/downloads/{{psarole}}'
+        state: present
+
+
+    - name: Set TempPathEnabled
+      ini_file:
+        path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+        section: Preferences
+        option: Downloads\TempPathEnabled
+        value: True
+        state: present
+
+    # FIRST TIME CONFIGURATION ####################################################
+    - name: 'Configuring {{psarole}} for first time use'
+      block:
+        - name: Enable AutoRun
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: AutoRun
+            option: enabled
+            value: True
+            state: present
+
+        - name: Enable Auto UnRar
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: AutoRun
+            option: program
+            value: '/usr/bin/unrar x -r \"%F/.\" \"%F/\"'
+            state: present
+
+        - name: Disable DHT
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\DHT
+            value: false
+            state: present
+
+        - name: Disable PeX
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\PeX
+            value: false
+            state: present
+
+        - name: Disable LSD
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\LSD
+            value: false
+            state: present
+
+        - name: Enable Encryption
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\Encryption
+            value: 1
+            state: present
+
+        - name: Don't use incomplete extension
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Downloads\UseIncompleteExtension
+            value: false
+            state: present
+
+        - name: Ignore slow torrents
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Queueing\IgnoreSlowTorrents
+            value: True
+            state: present
+
+        - name: Set MaxActiveDownloads
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Queueing\MaxActiveDownloads
+            value: 10
+            state: present
+
+        - name: Set MaxActiveTorrents
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Queueing\MaxActiveTorrents
+            value: 100
+            state: present
+
+        - name: Set MaxActiveUploads
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Queueing\MaxActiveUploads
+            value: 100
+            state: present
+
+        - name: Set GlobalMaxSeedingMinutes
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: BitTorrent
+            option: Session\GlobalMaxSeedingMinutes
+            value: 20160
+            state: present
+
+        - name: Set MaxRatio
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\MaxRatio
+            value: 1
+            state: present
+
+        - name: pause on MaxRatioAction
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: Bittorrent\MaxRatioAction
+            value: 1
+            state: present
+
+        - name: Disable csrf
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: WebUI\CSRFProtection
+            value: false
+            force: yes
+            state: present
+
+        - name: Disable HostHeaderValidation
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: WebUI\HostHeaderValidation
+            value: false
+            force: yes
+            state: present
+
+        - name: Disable ClickjackingProtection
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: WebUI\ClickjackingProtection
+            value: false
+            force: yes
+            state: present
+            
+        - name: Set ServerDomains
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: WebUI\ServerDomains
+            value: '*'
+            force: yes
+            state: present
+
+        - name: Set Address
+          ini_file:
+            path: '/psa/data/{{psarole}}/qBittorrent/qBittorrent.conf'
+            section: Preferences
+            option: WebUI\Address
+            value: '*'
+            force: yes
+            state: present
+            
+      when: not confcheck.stat.exists
+
+    - name: Restart {{psarole}}
+      docker_container:
+        name: '{{psarole}}'
+        state: started

@@ -1,0 +1,102 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+# ROLE NAME ####################################################################
+- name: 'Register TLD'
+  shell: 'cat /psa/var/role.name'
+  register: rolename
+  ignore_errors: True
+
+- name: 'Provide Role Name Information'
+  set_fact:
+    psarole: '{{rolename.stdout}}'
+
+# OAUTH INFO ###################################################################
+- name: Check if Anti Auth Variable Exists
+  stat:
+    path: '/psa/var/oauth.exists'
+  register: authcheck
+
+- name: 'OAuth Exists'
+  set_fact:
+    gauth: 'http://oauth:4181'
+  when: authcheck.stat.exists
+
+- name: 'OAuth Not Exists'
+  set_fact:
+    gauth: ''
+  when: not authcheck.stat.exists
+
+# RECALL PORT VARIABLES ########################################################
+- name: Register Ports
+  shell: 'cat /psa/var/server.ports'
+  register: portinfo
+  ignore_errors: True
+
+- name: 'Provide Ports Information'
+  set_fact:
+     serverports: '{{portinfo.stdout}}'
+
+# DOMAIN VARIABLES #############################################################
+- name: Register Domain
+  shell: 'cat /psa/var/server.domain'
+  register: domaininfo
+  ignore_errors: True
+
+- name: 'Provide Domain Information'
+  set_fact:
+     domain: '{{domaininfo.stdout}}'
+
+#### TLD VARIABLES #############################################################
+- name: Register TLD
+  shell: 'cat /psa/var/tld.status'
+  register: tldinfo
+  ignore_errors: True
+
+- name: 'Provide TLD Information'
+  set_fact:
+     tldset: '{{tldinfo.stdout}}'
+##################################################################### OTHER VARS
+
+- name: Register IP
+  shell: 'cat /psa/var/server.ip'
+  register: ipaddress
+  ignore_errors: True
+
+- name: Register HD Path
+  shell: 'cat /psa/var/hd.path'
+  register: path
+  ignore_errors: True
+
+- name: Register Auth Path
+  shell: 'cat /psa/var/server.ht'
+  register: auth
+  ignore_errors: True
+
+# OVERWRITE IMAGES #############################################################
+- name: Check if Image Variable Exists
+  stat:
+    path: '/psa/var/image/{{psarole}}'
+  register: imagecheck
+
+- name: 'Transfer Image Variable'
+  shell: 'cat /psa/var/image/{{psarole}}'
+  register: imagetemp
+  when: imagecheck.stat.exists
+
+- name: 'If Fact Does Not Match - Disable TLD'
+  set_fact:
+    image: '{{imagetemp.stdout}}'
+  when: imagecheck.stat.exists
+
+# EXTERNAL PORT FOR END BANNER
+- name: Export Internal Port
+  shell: 'echo {{ext1}} > /psa/tmp/program_port'
+  ignore_errors: True

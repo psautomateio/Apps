@@ -1,0 +1,279 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # FACTS #######################################################################
+    - name: 'Set Known Facts'
+      set_fact:
+        int1: '6789'
+        ext1: '6789'
+        image: 'linuxserver/nzbget'
+
+    # CORE (MANDATORY) ############################################################
+    - name: 'Mandatory Core Role'
+      include_tasks: '/psa/apps/_core.yml'
+
+    - name: 'Including folders'
+      include_tasks: '/psa/apps/_downloaders.yml'
+
+    - name: Create Folders
+      file: 'path={{item}} state=directory mode=0775 owner=1000 group=1000 recurse=yes'
+      with_items:
+        - '{{path.stdout}}/nzb'
+        - '{{path.stdout}}/{{psarole}}/finished'
+        - '{{path.stdout}}/{{psarole}}/incomplete/tv'
+        - '{{path.stdout}}/{{psarole}}/finished/tv'
+        - '{{path.stdout}}/{{psarole}}/incomplete/movies'
+        - '{{path.stdout}}/{{psarole}}/finished/movies'
+        - '{{path.stdout}}/{{psarole}}/nzb'
+        - '/psa/tmp'
+
+    - name: 'Including plugins'
+      include_tasks: '/psa/apps/_plugins.yml'
+
+    - name: 'Checking for existing app data'
+      stat:
+        path: /psa/data/{{psarole}}/nzbget.conf
+      register: confcheck
+
+    # LABELS ######################################################################
+    - name: 'Adding Traefik'
+      set_fact:
+        psa_labels:
+          traefik.frontend.auth.forward.address: '{{gauth}}'
+          traefik.enable: 'true'
+          traefik.port: '{{int1}}'
+          traefik.frontend.rule: 'Host:{{psarole}}.{{domain}},{{tldset}}'
+
+    - name: 'Setting PSA Volumes'
+      set_fact:
+        psa_volumes:
+          - '/etc/localtime:/etc/localtime:ro'
+          - '/psa/data/{{psarole}}:/config'
+          - '{{path.stdout}}:{{path.stdout}}'
+          - '/psa:/psa'
+          - '/psa/tmp:/tmp'
+          - '/mnt:/mnt'
+
+    - name: 'Setting PSA ENV'
+      set_fact:
+        psa_env:
+          PUID: '1000'
+          PGID: '1000'
+          LC_ALL: 'C'
+
+    # MAIN DEPLOYMENT #############################################################
+    - name: 'Deploying {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        image: '{{image}}'
+        pull: yes
+        published_ports:
+          - '{{serverports}}{{ext1}}:{{int1}}'
+        volumes: '{{psa_volumes}}'
+        env: '{{psa_env}}'
+        restart_policy: unless-stopped
+        networks:
+          - name: psautomate
+            aliases:
+              - '{{psarole}}'
+        state: started
+        labels: '{{psa_labels}}'
+
+    # CONFIGURATION #############################################################
+    - name: 'Waiting for {{psarole}} to initialize'
+      wait_for:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        state: present
+        delay: 5
+
+    - name: 'Stopping {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        state: stopped
+
+    - name: Set Main Location
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^MainDir\s*=.*'
+        line: 'MainDir=/config'
+        state: present
+
+    - name: Set download location
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^DestDir\s*=.*'
+        line: 'DestDir={{path.stdout}}/{{psarole}}/finished'
+        state: present
+
+    - name: Set incomplete location
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^InterDir\s*=.*'
+        line: 'InterDir={{path.stdout}}/{{psarole}}/incomplete'
+        state: present
+
+    - name: Set TempDir
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^TempDir\s*=.*'
+        line: 'TempDir=/psa/tmp'
+        state: present
+
+    - name: Set NzbDir Location
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^NzbDir\s*=.*'
+        line: 'NzbDir={{path.stdout}}/{{psarole}}/nzb'
+        state: present
+
+    - name: ScriptDir
+      lineinfile:
+        path: '/psa/data/{{psarole}}/nzbget.conf'
+        regexp: '^ScriptDir\s*=.*'
+        line: 'ScriptDir=/psa/data/{{psarole}}/scripts'
+        state: present
+
+    # FIRST TIME CONFIGURATION #############################################################
+    - name: 'Configuring {{psarole}} for first time use'
+      block:
+        - name: Lowercase & Set Movie Category
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category1.Name\s*=.*'
+            line: 'Category1.Name=movies'
+            state: present
+
+        - name: Set Location of Movies
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category1.DestDir\s*=.*'
+            line: 'Category1.DestDir='
+            state: present
+
+        - name: Lowercase & Set TV Category
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category2.Name\s*=.*'
+            line: 'Category2.Name=tv'
+            state: present
+
+        - name: Set Location of TV
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category2.DestDir\s*=.*'
+            line: 'Category2.DestDir='
+            state: present
+
+        - name: Lowercase & Set Music Category
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category3.Name\s*=.*'
+            line: 'Category3.Name=music'
+            state: present
+
+        - name: Set Location of Music
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category3.DestDir\s*=.*'
+            line: 'Category3.DestDir='
+            state: present
+
+        - name: Lowercase & Set EBook Category
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category4.Name\s*=.*'
+            line: 'Category4.Name=ebooks'
+            state: present
+
+        - name: Set Location of EBooks
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^Category4.DestDir\s*=.*'
+            line: 'Category4.DestDir='
+            state: present
+
+        - name: Lowercase & Set abook Category
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: 'Category5.Name\s*=.*'
+            line: 'Category5.Name=abooks'
+            state: present
+
+        - name: Set Location of aBooks
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: 'Category5.DestDir\s*=.*'
+            line: 'Category5.DestDir='
+            state: present
+
+        - name: Default User
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^ControlUsername\s*=.*'
+            line: 'ControlUsername='
+            state: present
+
+        - name: Default Password
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: 'ControlPassword\s*=.*'
+            line: 'ControlPassword='
+            state: present
+
+        - name: DirectUnpack Set to On
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^DirectUnpack\s*=.*'
+            line: 'DirectUnpack=yes'
+            state: present
+
+        - name: HealthCheck
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^HealthCheck\s*=.*'
+            line: 'HealthCheck=Delete'
+            state: present
+
+        - name: Set DiskSpace
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '^DiskSpace\s*=.*'
+            line: 'DiskSpace=25000'
+            state: present
+
+        - name: Remove Generic Task
+          lineinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            regexp: '{{ item.regexp }}'
+            state: absent
+          with_items:
+            - { regexp: '.Task1\.Time\=' }
+            - { regexp: '.Task1\.WeekDays\=' }
+            - { regexp: '.Task1\.Command\=' }
+            - { regexp: '.Task1\.Param\=' }
+
+        - name: Unpause
+          blockinfile:
+            path: '/psa/data/{{psarole}}/nzbget.conf'
+            block: |
+              Task1.Time=*,*:00,*:30
+              Task1.WeekDays=1-7
+              Task1.Command=UnpauseDownload
+              Task1.Param=
+            insertafter: '^### SCHEDULER'
+      when: not confcheck.stat.exists
+
+    - name: Restart {{psarole}}
+      docker_container:
+        name: '{{psarole}}'
+        state: started

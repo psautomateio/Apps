@@ -1,0 +1,63 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # FACTS #######################################################################
+    - name: 'Set Known Facts'
+      set_fact:
+        int1: '5076'
+        ext1: '5076'
+        image: 'linuxserver/hydra2'
+
+    # CORE (MANDATORY) ############################################################
+    - name: 'Mandatory Core Role'
+      include_tasks: '/psa/apps/_core.yml'
+
+    # LABELS ######################################################################
+    - name: 'Adding Traefik'
+      set_fact:
+        psa_labels:
+          traefik.frontend.auth.forward.address: '{{gauth}}'
+          traefik.enable: 'true'
+          traefik.port: '{{int1}}'
+          traefik.frontend.rule: 'Host:{{psarole}}.{{domain}},{{tldset}}'
+
+    - name: 'Setting PSA Volumes'
+      set_fact:
+        psa_volumes:
+          - '/psa/data/{{psarole}}:/config'
+          - '/etc/localtime:/etc/localtime:ro'
+          - '{{path.stdout}}/torrent:{{path.stdout}}/torrent'
+
+    - name: 'Setting PSA ENV'
+      set_fact:
+        psa_env:
+          PUID: '1000'
+          PGID: '1000'
+
+    # MAIN DEPLOYMENT #############################################################
+    - name: 'Deploying {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        image: '{{image}}'
+        pull: yes
+        published_ports:
+          - '{{serverports}}{{ext1}}:{{int1}}'
+        volumes: '{{psa_volumes}}'
+        env: '{{psa_env}}'
+        restart_policy: unless-stopped
+        networks:
+          - name: psautomate
+            aliases:
+              - '{{psarole}}'
+        state: started
+        labels: '{{psa_labels}}'

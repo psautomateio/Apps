@@ -1,0 +1,266 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # FACTS #######################################################################
+    - name: 'Set Known Facts'
+      set_fact:
+        psarole: 'lazylibrarian'
+        int1: '5299'
+        ext1: '5299'
+        image: 'linuxserver/lazylibrarian'
+
+    # CORE (MANDATORY) ############################################################
+    - name: 'Mandatory Core Role'
+      include_tasks: '/psa/apps/_core.yml''
+
+    - name: 'Checking for existing app data'
+      stat:
+        path: /psa/data/{{psarole}}/config.ini
+      register: inicheck
+
+    # LABELS ######################################################################
+    - name: 'Adding Traefik'
+      set_fact:
+        psa_labels:
+          traefik.frontend.auth.forward.address: '{{gauth}}'
+          traefik.enable: 'true'
+          traefik.port: '{{int1}}'
+          traefik.frontend.rule: 'Host:{{psarole}}.{{domain}},{{tldset}}'
+
+    - name: 'Setting PSA Volumes'
+      set_fact:
+        psa_volumes:
+          - '/psa/data/{{psarole}}:/config'
+          - '{{path.stdout}}:{{path.stdout}}'
+          - '/etc/localtime:/etc/localtime:ro'
+          - '/mnt:/mnt'
+
+    - name: 'Setting PSA ENV'
+      set_fact:
+        psa_env:
+          PUID: '1000'
+          PGID: '1000'
+
+    # MAIN DEPLOYMENT #############################################################
+    - name: 'Deploying {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        image: '{{image}}'
+        pull: yes
+        published_ports:
+          - '{{serverports}}{{ext1}}:{{int1}}'
+        volumes: '{{psa_volumes}}'
+        env: '{{psa_env}}'
+        restart_policy: unless-stopped
+        networks:
+          - name: psautomate
+            aliases:
+              - '{{psarole}}'
+        state: started
+        labels: '{{psa_labels}}'
+
+    # CONFIGURATION ####################################################
+
+    - name: 'Waiting for {{psarole}} to initialize'
+      wait_for:
+        path: '/psa/data/{{psarole}}/config.ini'
+        state: present
+        delay: 5
+
+    - name: 'Stopping {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        state: stopped
+
+    - name: Set eBooks library Location
+      ini_file:
+        path: '/psa/data/{{psarole}}/config.ini'
+        section: General
+        option: ebook_dir
+        value: '{{path.stdout}}/psaunity/ebooks'
+        state: present
+
+    - name: Set Audio Books library Location
+      ini_file:
+        path: '/psa/data/{{psarole}}/config.ini'
+        section: General
+        option: audio_dir
+        value: '{{path.stdout}}/psaunity/abooks'
+        state: present
+
+    - name: Set downloads location
+      ini_file:
+        path: '/psa/data/{{psarole}}/config.ini'
+        section: General
+        option: download_dir
+        value: '{{path.stdout}}/downloads/sabnzbd/ebooks,{{path.stdout}}/downloads/nzbget/ebooks,{{path.stdout}}/downloads/rutorrent/ebooks,{{path.stdout}}/downloads/qbittorrent/ebooks'
+        state: present
+
+    # FIRST TIME CONFIGURATION ####################################################
+
+    - name: 'Configuring {{psarole}} for first time use'
+      block:
+        - name: Enable audio tab
+          ini_file:
+            path: '/psa/data/{{psarole}}/config.ini'
+            section: General
+            option: audio_tab
+            value: 1
+            state: present
+
+        - name: Enable series tab
+          ini_file:
+            path: '/psa/data/{{psarole}}/config.ini'
+            section: General
+            option: series_tab
+            value: 1
+            state: present
+
+        - name: 'Configuring downloaders'
+          block:
+            - name: Set deluge host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: DELUGE
+                option: deluge_host
+                value: deluge
+                state: present
+
+            - name: Set deluge label
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: DELUGE
+                option: deluge_label
+                value: ebooks
+                state: present
+
+            - name: Set deluge port
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: DELUGE
+                option: deluge_port
+                value: 8112
+                state: present
+
+            - name: Set nzbget host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: NZBGet
+                option: nzbget_host
+                value: http://nzbget
+                state: present
+
+            - name: Set nzbget port
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: NZBGet
+                option: nzbget_port
+                value: 6789
+                state: present
+
+            - name: Set nzbget label
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: NZBGet
+                option: nzbget_label
+                value: ebooks
+                state: present
+
+            - name: Set qbittorrent host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: QBITTORRENT
+                option: qbittorrent_host
+                value: qbittorrent
+                state: present
+
+            - name: Set qbittorrent port
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: QBITTORRENT
+                option: qbittorrent_port
+                value: 8080
+                state: present
+
+            - name: Set qbittorrent label
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: QBITTORRENT
+                option: qbittorrent_label
+                value: ebooks
+                state: present
+
+            - name: Set sabnzbd host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: SABnzbd
+                option: sab_host
+                value: sabnzbd
+                state: present
+
+            - name: Set sabnzbd label
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: SABnzbd
+                option: sab_label
+                value: ebooks
+                state: present
+
+            - name: Set rtorrent host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: RTORRENT
+                option: rtorrent_host
+                value: rutorrent
+                state: present
+
+            - name: Set rtorrent label
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: RTORRENT
+                option: rtorrent_label
+                value: ebooks
+                state: present
+
+        - name: 'Configuring indexers'
+          block:
+            - name: Setup hydra on Newznab0 host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: Newznab0
+                option: host
+                value: nzbhydra:5076
+                state: present
+
+            - name: Setup hydra on Torznab0 host
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: Torznab0
+                option: host
+                value: nzbhydra:5076/torznab
+                state: present
+
+            - name: Setup hydra on Torznab0 priority
+              ini_file:
+                path: '/psa/data/{{psarole}}/config.ini'
+                section: Torznab0
+                option: dlpriority
+                value: 1
+                state: present
+
+      when: not inicheck.stat.exists
+
+    - name: Restart {{psarole}}
+      docker_container:
+        name: '{{psarole}}'
+        state: started

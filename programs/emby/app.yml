@@ -1,0 +1,109 @@
+#!/bin/bash
+#
+# Title:      PSAutomate
+# Based On:   PGBlitz (Reference Title File)
+# Original Author(s):  Admin9705 - Deiteq
+# PSAutomate Auther: fattylewis
+# URL:        https://psautomate.io - http://github.psautomate.io
+# GNU:        General Public License v3.0
+################################################################################
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    # FACTS #######################################################################
+    - name: 'Set Known Facts'
+      set_fact:
+        int1: '8096'
+        ext1: '8096'
+        image: 'emby/embyserver'
+
+    # CORE (MANDATORY) ############################################################
+    - name: 'Mandatory Core Role'
+      include_tasks: '/psa/apps/_core.yml'
+
+    - name: 'XML Check'
+      stat:
+        path: /psa/data/{{psarole}}/config/system.xml
+      register: xmlcheck
+
+    # LABELS ######################################################################
+    - name: 'Adding Traefik'
+      set_fact:
+        psa_labels:
+          traefik.frontend.auth.forward.address: '{{gauth}}'
+          traefik.enable: 'true'
+          traefik.port: '{{int1}}'
+          traefik.frontend.rule: 'Host:{{psarole}}.{{domain}},{{tldset}}'
+
+    - name: 'Setting PSA Volumes'
+      set_fact:
+        psa_volumes:
+          - /etc/localtime:/etc/localtime:ro
+          - /psa/data/{{psarole}}:/config
+          - '{{path.stdout}}:{{path.stdout}}'
+          - '/mnt:/mnt'
+          - '/psa/unity:/unity'
+          - '/psa:/psa'
+
+    - name: 'Setting PSA ENV'
+      set_fact:
+        psa_env:
+          UID: '1000'
+          GID: '1000'
+          GIDLIST: '1000'
+
+    # MAIN DEPLOYMENT #############################################################
+    - name: "Check"
+      stat:
+        path: "/dev/dri"
+      register: dev_dri
+
+    - name: 'Deploying {{psarole}}'
+      docker_container:
+        name: '{{psarole}}'
+        image: '{{image}}'
+        pull: yes
+        published_ports:
+          - '{{serverports}}{{ext1}}:{{int1}}'
+        devices: "{{ '/dev/dri:/dev/dri' if dev_dri.stat.exists == True | default(false) else omit }}"
+        volumes: '{{psa_volumes}}'
+        env: '{{psa_env}}'
+        restart_policy: unless-stopped
+        networks:
+          - name: psautomate
+            aliases:
+              - '{{psarole}}'
+        expose: '8096'
+        state: started
+        labels: '{{psa_labels}}'
+
+    # FIRST TIME CONFIGURATION ###########################################################
+    - name: 'Configuring {{psarole}} for first time use'
+      block:
+
+      - name: 'Pending XML Generation'
+        wait_for:
+          path: '/psa/data/{{psarole}}/config/system.xml'
+          state: present
+
+      - name: 'Wait 5 Seconds'
+        wait_for:
+          timeout: 5
+
+      - name: 'Stop {{psarole}}'
+        docker_container:
+          name: '{{psarole}}'
+          state: stopped
+
+      - name: 'Turn Off Reporting'
+        xml:
+          path: '/psa/data/{{psarole}}/config/system.xml'
+          xpath: /ServerConfiguration/EnableAnonymousUsageReporting
+          value: 'false'
+
+      - name: 'Restart {{psarole}}'
+        docker_container:
+          name: '{{psarole}}'
+          state: started
+      when: not xmlcheck.stat.exists
